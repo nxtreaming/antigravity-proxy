@@ -632,6 +632,8 @@ namespace Core {
         TimeoutConfig timeout;
         ProxyRules rules;               // 代理路由规则
         bool trafficLogging = false;    // Phase 3: 是否启用流量监控日志
+        bool diagnosticsAgentIpProbe = false; // 默认关闭外部 IP 探测，降低 release 默认联网行为面
+        std::string uiLoadNotify = "none";    // 加载提示策略：none/messagebox，默认不打扰用户
         bool childInjection = true;     // Phase 2: 是否自动注入子进程
         // 子进程注入模式：
         // - "filtered"（默认）：按 target_processes 过滤
@@ -798,6 +800,27 @@ namespace Core {
                 if (timeout.recv_ms <= 0) {
                     Logger::Warn("配置: timeout.recv 非法(" + std::to_string(timeout.recv_ms) + ")，已回退为 5000");
                     timeout.recv_ms = 5000;
+                }
+
+                // 可选诊断能力：默认关闭，避免 release 启动后主动访问外部 IP 查询服务。
+                if (j.contains("diagnostics") && j["diagnostics"].is_object()) {
+                    const auto& diag = j["diagnostics"];
+                    diagnosticsAgentIpProbe = diag.value("agent_ip_probe", false);
+                }
+
+                // 可选 UI 提示：默认 none；messagebox 仅用于用户明确需要可视化确认加载成功时。
+                if (j.contains("ui") && j["ui"].is_object()) {
+                    const auto& ui = j["ui"];
+                    uiLoadNotify = ui.value("load_notify", "none");
+                }
+                trimInPlace(uiLoadNotify);
+                std::transform(uiLoadNotify.begin(), uiLoadNotify.end(), uiLoadNotify.begin(),
+                               [](unsigned char c) { return (char)std::tolower(c); });
+                if (uiLoadNotify == "message_box") uiLoadNotify = "messagebox";
+                if (uiLoadNotify.empty()) uiLoadNotify = "none";
+                if (uiLoadNotify != "none" && uiLoadNotify != "messagebox") {
+                    Logger::Warn("配置: ui.load_notify 无效(" + uiLoadNotify + ")，已回退为 none (可选: none/messagebox)");
+                    uiLoadNotify = "none";
                 }
 
                 // ============= 代理路由规则解析 =============
@@ -985,7 +1008,9 @@ namespace Core {
                              ", child_injection=" + std::string(childInjection ? "true" : "false") +
                              ", child_injection_mode=" + childInjectionMode +
                              ", child_injection_exclude=" + std::to_string(childInjectionExclude.size()) +
-                             ", traffic_logging=" + std::string(trafficLogging ? "true" : "false"));
+                             ", traffic_logging=" + std::string(trafficLogging ? "true" : "false") +
+                             ", diagnostics.agent_ip_probe=" + std::string(diagnosticsAgentIpProbe ? "true" : "false") +
+                             ", ui.load_notify=" + uiLoadNotify);
 
                 // CRIT-1/2/WARN-3: 仅在 Load() 成功返回前输出“有效 CIDR 统计 + 跳过数量”，避免失败时误导
                 Logger::Info("路由规则: 编译统计: 有效 IPv4 CIDR=" + std::to_string(rules.compiled_valid_cidr_v4) +

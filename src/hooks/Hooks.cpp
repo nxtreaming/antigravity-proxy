@@ -741,7 +741,9 @@ static void LogRuntimeConfigSummaryOnce() {
             ", timeout(connect/send/recv)=" + std::to_string(config.timeout.connect_ms) + "/" + std::to_string(config.timeout.send_ms) + "/" +
                 std::to_string(config.timeout.recv_ms) +
             ", child_injection=" + std::string(config.childInjection ? "开" : "关") +
-            ", traffic_logging=" + std::string(config.trafficLogging ? "开" : "关")
+            ", traffic_logging=" + std::string(config.trafficLogging ? "开" : "关") +
+            ", diagnostics.agent_ip_probe=" + std::string(config.diagnosticsAgentIpProbe ? "开" : "关") +
+            ", ui.load_notify=" + config.uiLoadNotify
         );
         
         // 增加系统环境信息，便于诊断不同环境下的兼容性问题
@@ -755,10 +757,12 @@ static void LogRuntimeConfigSummaryOnce() {
             WSACleanup();
         }
 
-        // 额外诊断：在主 Antigravity 进程里异步探测“出口 IP + 最新 ls-main.log”。
-        // 设计意图：把“DLL 已生效但 agent 仍因 location 策略失败”的场景直接写进 proxy 日志，
-        // 降低用户误判成“新版 DLL 失效”的概率。
-        StartAgentIpDiagnosisOnce();
+        // 外部 IP 诊断默认关闭：只有用户显式 opt-in 时才访问 ipinfo.io，降低 release 默认联网行为面。
+        if (config.diagnosticsAgentIpProbe) {
+            StartAgentIpDiagnosisOnce();
+        } else if (Core::Logger::IsEnabled(Core::LogLevel::Debug)) {
+            Core::Logger::Debug("[诊断/IP] 已关闭自动出口 IP 探测。如需排查 location 问题，可设置 diagnostics.agent_ip_probe=true。");
+        }
     });
 }
 
@@ -990,6 +994,120 @@ static bool IsProxySelfTarget(const std::string& host, uint16_t port, const Core
     return port == proxy.port && (host == proxy.host || host == "127.0.0.1");
 }
 
+static std::string ProxyEndpointToString(const sockaddr_storage& ss) {
+    return SockaddrToString((const sockaddr*)&ss);
+}
+
+static bool AppendProxyEndpoint(const sockaddr* addr, int addrLen, int desiredFamily,
+                                std::vector<sockaddr_storage>* out, std::vector<int>* outLens) {
+    if (!addr || !out || !outLens) return false;
+    if (addr->sa_family != AF_INET && addr->sa_family != AF_INET6) return false;
+
+    sockaddr_storage ss{};
+    int len = 0;
+    if (addr->sa_family == AF_INET) {
+        if (addrLen < (int)sizeof(sockaddr_in)) return false;
+        if (desiredFamily == AF_INET6) {
+            // 目标 socket 是 IPv6 时，将 IPv4 代理端点映射为 v4-mapped IPv6，兼容双栈 socket。
+            const auto* a4 = (const sockaddr_in*)addr;
+            sockaddr_in6 mapped{};
+            mapped.sin6_family = AF_INET6;
+            mapped.sin6_port = a4->sin_port;
+            memset(&mapped.sin6_addr, 0, sizeof(mapped.sin6_addr));
+            mapped.sin6_addr.u.Byte[10] = 0xff;
+            mapped.sin6_addr.u.Byte[11] = 0xff;
+            memcpy(&mapped.sin6_addr.u.Byte[12], &a4->sin_addr, sizeof(a4->sin_addr));
+            memcpy(&ss, &mapped, sizeof(mapped));
+            len = (int)sizeof(mapped);
+        } else {
+            memcpy(&ss, addr, sizeof(sockaddr_in));
+            len = (int)sizeof(sockaddr_in);
+        }
+    } else {
+        if (addrLen < (int)sizeof(sockaddr_in6)) return false;
+        if (desiredFamily == AF_INET) return false;
+        memcpy(&ss, addr, sizeof(sockaddr_in6));
+        len = (int)sizeof(sockaddr_in6);
+    }
+
+    for (size_t i = 0; i < out->size(); ++i) {
+        if ((*outLens)[i] == len && memcmp(&(*out)[i], &ss, (size_t)len) == 0) {
+            return true;
+        }
+    }
+
+    out->push_back(ss);
+    outLens->push_back(len);
+    return true;
+}
+
+static bool ResolveProxyEndpoints(const Core::ProxyConfig& proxy, int desiredFamily,
+                                  std::vector<sockaddr_storage>* out, std::vector<int>* outLens) {
+    if (!out || !outLens) return false;
+    out->clear();
+    outLens->clear();
+    if (proxy.host.empty() || proxy.port <= 0 || proxy.port > 65535) {
+        Core::Logger::Error("代理地址无效: host=" + proxy.host + ", port=" + std::to_string(proxy.port));
+        return false;
+    }
+
+    in_addr addr4{};
+    if (inet_pton(AF_INET, proxy.host.c_str(), &addr4) == 1) {
+        sockaddr_in a4{};
+        a4.sin_family = AF_INET;
+        a4.sin_port = htons(proxy.port);
+        a4.sin_addr = addr4;
+        AppendProxyEndpoint((sockaddr*)&a4, (int)sizeof(a4), desiredFamily, out, outLens);
+        return !out->empty();
+    }
+
+    in6_addr addr6{};
+    if (inet_pton(AF_INET6, proxy.host.c_str(), &addr6) == 1) {
+        if (desiredFamily == AF_INET) {
+            Core::Logger::Error("代理地址族不兼容: IPv4 socket 无法连接 IPv6 代理 " + proxy.host);
+            return false;
+        }
+        sockaddr_in6 a6{};
+        a6.sin6_family = AF_INET6;
+        a6.sin6_port = htons(proxy.port);
+        a6.sin6_addr = addr6;
+        AppendProxyEndpoint((sockaddr*)&a6, (int)sizeof(a6), desiredFamily, out, outLens);
+        return !out->empty();
+    }
+
+    addrinfo hints{};
+    hints.ai_family = desiredFamily == AF_INET ? AF_INET : AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    addrinfo* res = nullptr;
+    int rc = fpGetAddrInfo ? fpGetAddrInfo(proxy.host.c_str(), nullptr, &hints, &res)
+                           : getaddrinfo(proxy.host.c_str(), nullptr, &hints, &res);
+    if (rc != 0 || !res) {
+        Core::Logger::Error("代理地址解析失败: " + proxy.host + ", 错误码=" + std::to_string(rc));
+        return false;
+    }
+
+    for (addrinfo* it = res; it; it = it->ai_next) {
+        if (!it->ai_addr) continue;
+        if (it->ai_addr->sa_family == AF_INET) {
+            auto a4 = *(sockaddr_in*)it->ai_addr;
+            a4.sin_port = htons(proxy.port);
+            AppendProxyEndpoint((sockaddr*)&a4, (int)sizeof(a4), desiredFamily, out, outLens);
+        } else if (it->ai_addr->sa_family == AF_INET6) {
+            auto a6 = *(sockaddr_in6*)it->ai_addr;
+            a6.sin6_port = htons(proxy.port);
+            AppendProxyEndpoint((sockaddr*)&a6, (int)sizeof(a6), desiredFamily, out, outLens);
+        }
+    }
+    freeaddrinfo(res);
+
+    if (out->empty()) {
+        Core::Logger::Error("代理地址解析无可用结果: " + proxy.host);
+        return false;
+    }
+    return true;
+}
+
 static bool BuildProxyAddr(const Core::ProxyConfig& proxy, sockaddr_in* proxyAddr, const sockaddr_in* baseAddr) {
     if (!proxyAddr) return false;
     if (baseAddr) {
@@ -998,23 +1116,12 @@ static bool BuildProxyAddr(const Core::ProxyConfig& proxy, sockaddr_in* proxyAdd
         memset(proxyAddr, 0, sizeof(sockaddr_in));
         proxyAddr->sin_family = AF_INET;
     }
-    if (inet_pton(AF_INET, proxy.host.c_str(), &proxyAddr->sin_addr) != 1) {
-        // 尝试使用 DNS 解析代理主机名（仅 IPv4）
-        addrinfo hints{};
-        hints.ai_family = AF_INET;
-        hints.ai_socktype = SOCK_STREAM;
-        hints.ai_protocol = IPPROTO_TCP;
-        addrinfo* res = nullptr;
-        int rc = fpGetAddrInfo ? fpGetAddrInfo(proxy.host.c_str(), nullptr, &hints, &res)
-                               : getaddrinfo(proxy.host.c_str(), nullptr, &hints, &res);
-        if (rc != 0 || !res) {
-            Core::Logger::Error("代理地址解析失败: " + proxy.host + ", 错误码=" + std::to_string(rc));
-            return false;
-        }
-        auto* addr = (sockaddr_in*)res->ai_addr;
-        proxyAddr->sin_addr = addr->sin_addr;
-        freeaddrinfo(res);
+    std::vector<sockaddr_storage> endpoints;
+    std::vector<int> endpointLens;
+    if (!ResolveProxyEndpoints(proxy, AF_INET, &endpoints, &endpointLens)) {
+        return false;
     }
+    memcpy(proxyAddr, &endpoints[0], sizeof(sockaddr_in));
     proxyAddr->sin_port = htons(proxy.port);
     return true;
 }
@@ -1027,53 +1134,13 @@ static bool BuildProxyAddrV6(const Core::ProxyConfig& proxy, sockaddr_in6* proxy
         memset(proxyAddr, 0, sizeof(sockaddr_in6));
     }
     proxyAddr->sin6_family = AF_INET6;
-    
-    in6_addr addr6{};
-    if (inet_pton(AF_INET6, proxy.host.c_str(), &addr6) == 1) {
-        proxyAddr->sin6_addr = addr6;
-    } else {
-        in_addr addr4{};
-        if (inet_pton(AF_INET, proxy.host.c_str(), &addr4) == 1) {
-            // IPv4 代理地址映射为 IPv6，兼容双栈 socket
-            unsigned char* bytes = reinterpret_cast<unsigned char*>(&proxyAddr->sin6_addr);
-            memset(bytes, 0, 16);
-            bytes[10] = 0xff;
-            bytes[11] = 0xff;
-            memcpy(bytes + 12, &addr4, sizeof(addr4));
-        } else {
-            // 优先解析 IPv6，失败则回退 IPv4 并映射
-            addrinfo hints{};
-            hints.ai_family = AF_INET6;
-            hints.ai_socktype = SOCK_STREAM;
-            hints.ai_protocol = IPPROTO_TCP;
-            addrinfo* res = nullptr;
-            int rc = fpGetAddrInfo ? fpGetAddrInfo(proxy.host.c_str(), nullptr, &hints, &res)
-                                   : getaddrinfo(proxy.host.c_str(), nullptr, &hints, &res);
-            if (rc == 0 && res) {
-                proxyAddr->sin6_addr = ((sockaddr_in6*)res->ai_addr)->sin6_addr;
-                freeaddrinfo(res);
-            } else {
-                if (res) freeaddrinfo(res);
-                addrinfo hints4{};
-                hints4.ai_family = AF_INET;
-                hints4.ai_socktype = SOCK_STREAM;
-                hints4.ai_protocol = IPPROTO_TCP;
-                rc = fpGetAddrInfo ? fpGetAddrInfo(proxy.host.c_str(), nullptr, &hints4, &res)
-                                   : getaddrinfo(proxy.host.c_str(), nullptr, &hints4, &res);
-                if (rc != 0 || !res) {
-                    Core::Logger::Error("代理地址解析失败: " + proxy.host + ", 错误码=" + std::to_string(rc));
-                    return false;
-                }
-                in_addr resolved4 = ((sockaddr_in*)res->ai_addr)->sin_addr;
-                freeaddrinfo(res);
-                unsigned char* bytes = reinterpret_cast<unsigned char*>(&proxyAddr->sin6_addr);
-                memset(bytes, 0, 16);
-                bytes[10] = 0xff;
-                bytes[11] = 0xff;
-                memcpy(bytes + 12, &resolved4, sizeof(resolved4));
-            }
-        }
+
+    std::vector<sockaddr_storage> endpoints;
+    std::vector<int> endpointLens;
+    if (!ResolveProxyEndpoints(proxy, AF_INET6, &endpoints, &endpointLens)) {
+        return false;
     }
+    memcpy(proxyAddr, &endpoints[0], sizeof(sockaddr_in6));
     proxyAddr->sin6_port = htons(proxy.port);
     return true;
 }
@@ -1194,69 +1261,64 @@ static bool BuildUdpRelayAddrForSocketFamily(int socketFamily, const sockaddr_st
 
 static SOCKET ConnectTcpToProxyServer(const Core::ProxyConfig& proxy) {
     // 说明：UDP Associate 需要一个到代理的 TCP 控制连接
-    // 这里使用最小实现：仅支持 IP 直连或常规 DNS 解析（建议 proxy.host 填 127.0.0.1/::1）
-    int family = AF_INET;
-    in6_addr tmp6{};
-    if (!proxy.host.empty() && inet_pton(AF_INET6, proxy.host.c_str(), &tmp6) == 1) {
-        family = AF_INET6;
-    }
-
-    SOCKET tcpSock = socket(family, SOCK_STREAM, IPPROTO_TCP);
-    if (tcpSock == INVALID_SOCKET) {
-        int err = WSAGetLastError();
-        Core::Logger::Error("SOCKS5 UDP: 创建 TCP 控制连接失败, WSA错误码=" + std::to_string(err));
+    // 使用 AF_UNSPEC 解析并逐个候选尝试，支持 hyperv.mshome.net 这类 DHCP/本地域名。
+    std::vector<sockaddr_storage> endpoints;
+    std::vector<int> endpointLens;
+    if (!ResolveProxyEndpoints(proxy, AF_UNSPEC, &endpoints, &endpointLens)) {
         return INVALID_SOCKET;
     }
 
-    // 非阻塞 connect + WaitConnect，避免卡死目标进程
-    u_long nb = 1;
-    ioctlsocket(tcpSock, FIONBIO, &nb);
-
-    sockaddr_storage proxyAddrSs{};
-    int proxyAddrLen = 0;
-    if (family == AF_INET6) {
-        sockaddr_in6 proxyAddr6{};
-        if (!BuildProxyAddrV6(proxy, &proxyAddr6, nullptr)) {
-            if (fpCloseSocket) fpCloseSocket(tcpSock);
-            return INVALID_SOCKET;
+    auto& config = Core::Config::Instance();
+    int lastErr = 0;
+    for (size_t i = 0; i < endpoints.size(); ++i) {
+        const int family = endpoints[i].ss_family;
+        SOCKET tcpSock = socket(family, SOCK_STREAM, IPPROTO_TCP);
+        if (tcpSock == INVALID_SOCKET) {
+            lastErr = WSAGetLastError();
+            Core::Logger::Warn("SOCKS5 UDP: 创建 TCP 控制连接失败, endpoint=" + ProxyEndpointToString(endpoints[i]) +
+                               ", WSA错误码=" + std::to_string(lastErr));
+            continue;
         }
-        memcpy(&proxyAddrSs, &proxyAddr6, sizeof(proxyAddr6));
-        proxyAddrLen = (int)sizeof(proxyAddr6);
-    } else {
-        sockaddr_in proxyAddr{};
-        if (!BuildProxyAddr(proxy, &proxyAddr, nullptr)) {
-            if (fpCloseSocket) fpCloseSocket(tcpSock);
-            return INVALID_SOCKET;
-        }
-        memcpy(&proxyAddrSs, &proxyAddr, sizeof(proxyAddr));
-        proxyAddrLen = (int)sizeof(proxyAddr);
-    }
 
-    int rc = fpConnect ? fpConnect(tcpSock, (sockaddr*)&proxyAddrSs, proxyAddrLen)
-                       : connect(tcpSock, (sockaddr*)&proxyAddrSs, proxyAddrLen);
-    if (rc != 0) {
-        int err = WSAGetLastError();
-        if (err == WSAEWOULDBLOCK || err == WSAEINPROGRESS) {
-            auto& config = Core::Config::Instance();
-            if (!Network::SocketIo::WaitConnect(tcpSock, config.timeout.connect_ms)) {
-                int werr = WSAGetLastError();
-                Core::Logger::Error("SOCKS5 UDP: 连接代理服务器失败, proxy=" + proxy.host + ":" + std::to_string(proxy.port) +
-                                    ", WSA错误码=" + std::to_string(werr));
-                if (fpCloseSocket) fpCloseSocket(tcpSock);
-                return INVALID_SOCKET;
+        // 非阻塞 connect + WaitConnect，避免卡死目标进程
+        u_long nb = 1;
+        ioctlsocket(tcpSock, FIONBIO, &nb);
+
+        int rc = fpConnect ? fpConnect(tcpSock, (sockaddr*)&endpoints[i], endpointLens[i])
+                           : connect(tcpSock, (sockaddr*)&endpoints[i], endpointLens[i]);
+        if (rc != 0) {
+            int err = WSAGetLastError();
+            if (err == WSAEWOULDBLOCK || err == WSAEINPROGRESS) {
+                if (!Network::SocketIo::WaitConnect(tcpSock, config.timeout.connect_ms)) {
+                    err = WSAGetLastError();
+                    Core::Logger::Warn("SOCKS5 UDP: 连接代理候选失败, endpoint=" + ProxyEndpointToString(endpoints[i]) +
+                                       ", WSA错误码=" + std::to_string(err));
+                    CloseSocketCompat(tcpSock);
+                    lastErr = err;
+                    continue;
+                }
+            } else {
+                Core::Logger::Warn("SOCKS5 UDP: 连接代理候选失败, endpoint=" + ProxyEndpointToString(endpoints[i]) +
+                                   ", WSA错误码=" + std::to_string(err));
+                CloseSocketCompat(tcpSock);
+                lastErr = err;
+                continue;
             }
-        } else {
-            Core::Logger::Error("SOCKS5 UDP: 连接代理服务器失败, proxy=" + proxy.host + ":" + std::to_string(proxy.port) +
-                                ", WSA错误码=" + std::to_string(err));
-            if (fpCloseSocket) fpCloseSocket(tcpSock);
-            return INVALID_SOCKET;
         }
+
+        // 连接完成后切回阻塞：后续握手使用 SocketIo::SendAll/RecvExact（内部兼容 EWOULDBLOCK）
+        nb = 0;
+        ioctlsocket(tcpSock, FIONBIO, &nb);
+        if (Core::Logger::IsEnabled(Core::LogLevel::Debug)) {
+            Core::Logger::Debug("SOCKS5 UDP: 已连接代理候选, endpoint=" + ProxyEndpointToString(endpoints[i]));
+        }
+        return tcpSock;
     }
 
-    // 连接完成后切回阻塞：后续握手使用 SocketIo::SendAll/RecvExact（内部兼容 EWOULDBLOCK）
-    nb = 0;
-    ioctlsocket(tcpSock, FIONBIO, &nb);
-    return tcpSock;
+    if (lastErr != 0) WSASetLastError(lastErr);
+    Core::Logger::Error("SOCKS5 UDP: 所有代理候选均连接失败, proxy=" + proxy.host + ":" + std::to_string(proxy.port) +
+                        (lastErr ? ", 最后WSA错误码=" + std::to_string(lastErr) : std::string("")));
+    return INVALID_SOCKET;
 }
 
 static void DropUdpOverlappedContext(LPWSAOVERLAPPED ovl) {

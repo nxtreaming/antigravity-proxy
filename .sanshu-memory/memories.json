@@ -3,92 +3,28 @@
   "project_path": "E:\\ProjectCode\\C++Code\\antigravity-proxy",
   "entries": [
     {
-      "id": "d7c7e3d7-babf-468d-b467-5b2d43e32f8f",
-      "content": "用户约束：不要生成总结性Markdown文档；不要生成测试脚本；不要编译/运行（用户自行操作）。交互提问必须通过 zhi 工具。",
-      "content_normalized": "用户约束不要生成总结性markdown文档不要生成测试脚本不要编译/运行用户自行操作交互提问必须通过 zhi 工具",
-      "category": "Rule",
-      "created_at": "2026-02-03T11:28:47.984500900Z",
-      "updated_at": "2026-02-03T11:28:47.984501Z"
-    },
-    {
-      "id": "0b05ec1b-8477-41b3-84e6-a21ef140ca84",
-      "content": "用户强调：禁止生成总结性 Markdown/README；禁止生成测试脚本/测试代码；禁止编译与运行（用户自行编译/运行）。",
-      "content_normalized": "用户强调禁止生成总结性 markdown/readme禁止生成测试脚本/测试代码禁止编译与运行用户自行编译/运行",
-      "category": "Rule",
-      "created_at": "2026-02-03T11:28:47.984506700Z",
-      "updated_at": "2026-02-03T11:28:47.984506700Z"
-    },
-    {
-      "id": "7cdf9b7c-5e8e-4661-9d9c-22eb6ebb7c4f",
-      "content": "用户再次强调：不要生成总结性 Markdown 文档；不要生成测试脚本；不要编译或运行（用户自己编译/运行）。",
-      "content_normalized": "用户再次强调不要生成总结性 markdown 文档不要生成测试脚本不要编译或运行用户自己编译/运行",
-      "category": "Rule",
-      "created_at": "2026-02-03T11:28:47.984508900Z",
-      "updated_at": "2026-02-03T11:28:47.984509Z"
-    },
-    {
-      "id": "5298c96c-edcc-4d08-a476-9f75ca2ba021",
-      "content": "对话与文档措辞偏好：语气尽量像正常开发者口吻，整体正经但可以带一点小调皮，避免过度营销腔。",
-      "content_normalized": "对话与文档措辞偏好语气尽量像正常开发者口吻整体正经但可以带一点小调皮避免过度营销腔",
+      "id": "d974dc24-89f5-4871-b9bf-955a72c1aaa9",
+      "content": "用户偏好更新：允许并希望在合适任务中生成总结性 Markdown 文档、测试脚本，协助编译与运行；仍需结合当前任务约束和 zhi 确认执行。",
+      "content_normalized": "用户偏好更新允许并希望在合适任务中生成总结性 markdown 文档测试脚本协助编译与运行仍需结合当前任务约束和 zhi 确认执行",
       "category": "Preference",
-      "created_at": "2026-02-03T11:28:47.984606200Z",
-      "updated_at": "2026-02-03T11:28:47.984606300Z"
+      "created_at": "2026-06-17T05:22:43.510970100Z",
+      "updated_at": "2026-06-17T05:22:43.510970100Z"
     },
     {
-      "id": "86b23f1e-79ac-4936-b561-516b4db28964",
-      "content": "用户说明：当前提供的长日志为“对方/朋友那台无法成功代理的机器”的运行日志（非用户自己机器）。",
-      "content_normalized": "用户说明当前提供的长日志为对方/朋友那台无法成功代理的机器的运行日志非用户自己机器",
-      "category": "Context",
-      "created_at": "2026-02-03T11:28:47.984765300Z",
-      "updated_at": "2026-02-03T11:28:47.984765400Z"
-    },
-    {
-      "id": "67160505-e2e4-4e95-b4ab-ef5b3ad2457c",
-      "content": "排障上下文：目标程序为 `Antigravity.exe` 与 `language_server_windows_x64.exe`；在国内环境必须走代理。对方机器移除本项目 DLL 后改用 Clash TUN 模式可正常访问，说明网络/Clash 本身可用，问题集中在 DLL Hook 代理路径（当前未代理 UDP/QUIC 的可能性很高）。",
-      "content_normalized": "排障上下文目标程序为 `antigravityexe` 与 `language_server_windows_x64exe`在国内环境必须走代理对方机器移除本项目 dll 后改用 clash tun 模式可正常访问说明网络/clash 本身可用问题集中在 dll hook 代理路径当前未代理 udp/quic 的可能性很高",
-      "category": "Context",
-      "created_at": "2026-02-03T11:28:47.984768400Z",
-      "updated_at": "2026-02-03T11:28:47.984768400Z"
-    },
-    {
-      "id": "0ddcdaac-9563-4e0b-a47d-de1a87fef19a",
-      "content": "acemcp 代码索引已启用 - 配置摘要: 文件扩展名=[\".py\", \".js\", \".ts\", \".jsx\", \".tsx\", \".java\", \".go\", \".rs\", \".cpp\", \".c\", \".h\", \".hpp\", \".cs\", \".rb\", \".php\", \".md\", \".txt\", \".json\", \".yaml\", \".yml\", \".toml\", \".xml\", \".html\", \".css\", \".scss\", \".sql\", \".sh\", \".bash\"], 排除模式=[\"node_modules\", \".git\", \"target\", \"dist\"], 批次大小=10, 最大行数/块=800",
-      "content_normalized": "acemcp 代码索引已启用 - 配置摘要 文件扩展名=py js ts jsx tsx java go rs cpp c h hpp cs rb php md txt json yaml yml toml xml html css scss sql sh bash 排除模式=node_modules git target dist 批次大小=10 最大行数/块=800",
-      "category": "Context",
-      "created_at": "2026-02-03T11:28:47.989762900Z",
-      "updated_at": "2026-02-03T11:28:47.989762900Z"
-    },
-    {
-      "id": "24f15b1a-96e7-41eb-b4a8-4fae14b24d98",
-      "content": "用户最新偏好：允许在合适时生成总结性 Markdown 文档、测试脚本、执行编译与运行；若任务需要，可主动协助完成。",
-      "content_normalized": "用户最新偏好允许在合适时生成总结性 markdown 文档测试脚本执行编译与运行若任务需要可主动协助完成",
-      "category": "Preference",
-      "created_at": "2026-04-22T09:19:44.604543100Z",
-      "updated_at": "2026-04-22T09:19:44.604543100Z"
-    },
-    {
-      "id": "cb09ad79-446e-484a-a011-263abbc59026",
-      "content": "用户要求：优先使用 sou 进行代码语义搜索定位，再读取具体代码；需要最新框架/库信息时优先使用 context7。",
-      "content_normalized": "用户要求优先使用 sou 进行代码语义搜索定位再读取具体代码需要最新框架/库信息时优先使用 context7",
+      "id": "7bcf2c05-234d-4cfe-9069-62bb76fb9e68",
+      "content": "项目工作流规则：所有关键提问、方案确认和完成确认必须通过三术 zhi 展示；代码定位优先使用 sou 语义搜索，再读取具体上下文。",
+      "content_normalized": "项目工作流规则所有关键提问方案确认和完成确认必须通过三术 zhi 展示代码定位优先使用 sou 语义搜索再读取具体上下文",
       "category": "Rule",
-      "created_at": "2026-04-22T09:19:44.609793500Z",
-      "updated_at": "2026-04-22T09:19:44.609793500Z"
+      "created_at": "2026-06-17T05:22:43.526582600Z",
+      "updated_at": "2026-06-17T05:22:43.526582600Z"
     },
     {
-      "id": "9a29de44-352c-4706-a041-58458125f52f",
-      "content": "2026-04-22 排障结论：当前 Antigravity 对话异常的直接错误来自应用侧语言服务器返回 `FAILED_PRECONDITION (code 400): User location is not supported for the API use.`；DLL 代理链路已生效并成功建立到 oauth2.googleapis.com / daily-cloudcode-pa.googleapis.com 的 SOCKS5 隧道。代码侧次要风险是 child_injection_mode=filtered 会跳过 language_server 的 node.exe 子进程。",
-      "content_normalized": "2026-04-22 排障结论当前 antigravity 对话异常的直接错误来自应用侧语言服务器返回 `failed_precondition code 400 user location is not supported for the api use`dll 代理链路已生效并成功建立到 oauth2googleapiscom / daily-cloudcode-pagoogleapiscom 的 socks5 隧道代码侧次要风险是 child_injection_mode=filtered 会跳过 language_server 的 nodeexe 子进程",
-      "category": "Context",
-      "created_at": "2026-04-22T09:19:44.616193200Z",
-      "updated_at": "2026-04-22T09:19:44.616193200Z"
-    },
-    {
-      "id": "48056c07-3319-4201-b6d7-d2c3605f17ef",
-      "content": "2026-04-22 深挖结论：node.exe 兼容注入补丁已验证生效，但 Antigravity 对话仍报 `FAILED_PRECONDITION (code 400): User location is not supported for the API use.`。进一步确认当前 agent mode 路径关联 `C:\\Users\\yuaotian\\.gemini\\settings.json` 中的 `selectedAuthType=oauth-personal`。最终通过更换代理出口 IP 后恢复，说明该问题与出口 IP/ASN（机房/托管特征）强相关，而非 DLL 注入失效。",
-      "content_normalized": "2026-04-22 深挖结论nodeexe 兼容注入补丁已验证生效但 antigravity 对话仍报 `failed_precondition code 400 user location is not supported for the api use`进一步确认当前 agent mode 路径关联 `c\\users\\yuaotian\\gemini\\settingsjson` 中的 `selectedauthtype=oauth-personal`最终通过更换代理出口 ip 后恢复说明该问题与出口 ip/asn机房/托管特征强相关而非 dll 注入失效",
-      "category": "Context",
-      "created_at": "2026-04-22T11:31:08.820825Z",
-      "updated_at": "2026-04-22T11:31:08.820825Z"
+      "id": "613d52c1-ff3f-472c-9ed8-75e4050c5912",
+      "content": "工具规则：需要框架/库最新官方文档和 API 用法时优先使用 context7；需要实时搜索信息时使用 tavily 获取最新准确信息。涉及页面美化、UI 描述、设计系统或 UI 审查时优先使用 uiux 工具。",
+      "content_normalized": "工具规则需要框架/库最新官方文档和 api 用法时优先使用 context7需要实时搜索信息时使用 tavily 获取最新准确信息涉及页面美化ui 描述设计系统或 ui 审查时优先使用 uiux 工具",
+      "category": "Rule",
+      "created_at": "2026-06-17T05:22:43.542666400Z",
+      "updated_at": "2026-06-17T05:22:43.542666400Z"
     }
   ],
   "last_dedup_at": "2026-02-03T11:28:47.985421800Z",
